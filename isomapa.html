@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>IsoMapa 15/30 – Accesibilidad a pie/bici</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Turf.js -->
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+<!-- Leaflet EasyPrint (export PNG) -->
+<script src="https://unpkg.com/leaflet-easyprint@2.1.9/dist/bundle.min.js"></script>
+
+<style>
+  :root { --c1:#1f77b4; --c2:#2ca02c; --c3:#ff7f0e; --c4:#d62728;
+          --school:#8b5cf6; --health:#ef4444; --bank:#0ea5e9; --market:#f59e0b; --police:#10b981; }
+  html,body,#map { height:100%; margin:0; }
+  .panel {
+    position: absolute; z-index: 1000; top: 12px; left: 12px;
+    background:#fff; padding:12px; border-radius:10px; box-shadow:0 8px 20px rgba(0,0,0,.15);
+    max-width: 380px; font-family: system-ui, Arial, sans-serif;
+  }
+  .panel h2 { margin:0 0 8px; font-size:18px; color:#1d3557 }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap:wrap }
+  select, input, button { font-size:14px; padding:6px 8px }
+  button { background:#2563eb; color:#fff; border:0; border-radius:6px; cursor:pointer }
+  button.secondary { background:#64748b }
+  .note { font-size:12px; color:#475569; margin-top:4px }
+  .status { margin-top:6px; font-size:13px; color:#0f172a }
+  .warn { color:#b91c1c }
+  table { width:100%; font-size:12px; border-collapse: collapse; margin-top:8px }
+  th,td { border-bottom:1px solid #e2e8f0; padding:4px 6px; text-align:left; vertical-align:top }
+  .legend { margin-top:6px; font-size:12px; display:grid; grid-template-columns:auto 1fr; gap:4px 10px }
+  .legend span.color { display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:middle }
+  .footer-tools { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap }
+  .link { color:#2563eb; text-decoration: none }
+  .pill { display:inline-block; padding:1px 6px; border-radius:999px; font-size:11px; background:#eef2ff }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h2>IsoMapa 15/30</h2>
+  <div class="row">
+    <label>Modo:</label>
+    <select id="modo">
+      <option value="foot-walking">🚶 A pie</option>
+      <option value="cycling-regular">🚴 En bici</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Tiempos (min):</label>
+    <label><input id="t5" type="checkbox" checked>5</label>
+    <label><input id="t10" type="checkbox" checked>10</label>
+    <label><input id="t15" type="checkbox" checked>15</label>
+    <label><input id="t30" type="checkbox" checked>30</label>
+  </div>
+  <div class="row">
+    <button id="btnClick">📍 Click en el mapa</button>
+    <button id="btnUbicacion" class="secondary">🎯 Usar mi ubicación</button>
+  </div>
+
+  <div class="legend">
+    <div><span class="color" style="background:rgba(31,119,180,.35);border:1px solid var(--c1)"></span></div><div>5 min</div>
+    <div><span class="color" style="background:rgba(44,160,44,.35);border:1px solid var(--c2)"></span></div><div>10 min</div>
+    <div><span class="color" style="background:rgba(255,127,14,.35);border:1px solid var(--c3)"></span></div><div>15 min</div>
+    <div><span class="color" style="background:rgba(214,39,40,.35);border:1px solid var(--c4)"></span></div><div>30 min</div>
+  </div>
+
+  <div class="legend" style="margin-top:6px">
+    <div><span class="color" style="background:var(--health)"></span></div><div>Hospital/Clínica</div>
+    <div><span class="color" style="background:var(--school)"></span></div><div>Escuela/Colegio</div>
+    <div><span class="color" style="background:var(--bank)"></span></div><div>Banco</div>
+    <div><span class="color" style="background:var(--market)"></span></div><div>Mercado/Supermercado</div>
+    <div><span class="color" style="background:var(--police)"></span></div><div>Policía</div>
+  </div>
+
+  <div class="note">Categorías OSM: escuelas, hospitales/clinicas, bancos, mercados/supermercados y policía.</div>
+  <div class="status" id="status">Tip: haz click en el mapa para generar isocronas.</div>
+
+  <table id="tabla">
+    <thead>
+      <tr><th>Radio (min)</th><th>POI</th><th>Paraderos ATU</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="footer-tools">
+    <button id="btnPng" class="secondary">🖼️ Exportar PNG</button>
+    <button id="btnGeo" class="secondary">⬇️ Export GeoJSON</button>
+  </div>
+  <div class="note" style="margin-top:6px">
+    ORS key requerida. <a href="https://openrouteservice.org/dev/#/signup" target="_blank" class="link">Obtén tu API Key</a>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<script>
+/* ===================== CONFIG ===================== */
+const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjIwZmVmZmJlNjgxODQwZjE5OGU4MGMxM2JjY2U1OTczIiwiaCI6Im11cm11cjY0In0=';
+const ATU_PARADEROS_URL = ''; // opcional
+
+/* ===================== MAPA ===================== */
+const map = L.map('map').setView([-12.0621, -77.0465], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+let origenMarker = null;
+const isochroneLayers = [];
+let lastIsochronesGeoJSON = null;
+
+const poiLayerGroup = L.layerGroup().addTo(map);
+const paraderoLayerGroup = L.layerGroup().addTo(map);
+let cachedParaderos = null; // GeoJSON (FeatureCollection)
+
+/* ===================== UI ===================== */
+const $status = document.getElementById('status');
+document.getElementById('btnClick').onclick = () => {
+  $status.textContent = 'Haz click en el mapa…';
+  map.once('click', (e) => runFromPoint(e.latlng));
+};
+document.getElementById('btnUbicacion').onclick = () => {
+  $status.textContent = 'Localizando…';
+  map.locate({setView:true, maxZoom:15});
+  map.once('locationfound', (e)=> runFromPoint(e.latlng));
+};
+document.getElementById('btnPng').onclick = () => {
+  document.querySelector('.leaflet-control-easyPrint a').click();
+};
+document.getElementById('btnGeo').onclick = exportGeoJSON;
+
+/* ===================== EasyPrint ===================== */
+L.easyPrint({
+  title: 'Exportar PNG',
+  position: 'topleft',
+  filename: 'isomapa',
+  exportOnly: true
+}).addTo(map);
+
+/* ===================== LÓGICA PRINCIPAL ===================== */
+async function runFromPoint(latlng){
+  try {
+    clearIsochrones();
+    clearPOIs();
+    if(origenMarker) map.removeLayer(origenMarker);
+    origenMarker = L.marker(latlng).addTo(map);
+
+    const selMins = [ ['t5',5], ['t10',10], ['t15',15], ['t30',30] ]
+      .filter(([id]) => document.getElementById(id).checked)
+      .map(([,m]) => m);
+    if(selMins.length === 0){ alert('Seleccione al menos un tiempo'); return; }
+
+    $status.textContent = 'Calculando isocronas…';
+    const iso = await getIsochrones(latlng, document.getElementById('modo').value, selMins);
+    lastIsochronesGeoJSON = iso;
+    drawIsochrones(iso);
+
+    // BBox del mayor polígon (último por valor) para pedir POIs
+    const biggest = iso.features[iso.features.length - 1];
+    const bbox = turf.bbox(biggest);
+
+    $status.textContent = 'Descargando POIs OSM… (Overpass)';
+    const poiFC = await fetchPOIsFromOverpass(bbox);
+
+    // Paraderos ATU (opcional)
+    if (ATU_PARADEROS_URL && !cachedParaderos) {
+      try {
+        const r = await fetch(ATU_PARADEROS_URL);
+        if(r.ok) cachedParaderos = await r.json();
+      } catch(e){ console.warn('No se pudo cargar paraderos ATU', e); }
+    }
+
+    // Conteos + dibujar puntos dentro de cada isócrona
+    $status.textContent = 'Filtrando POIs dentro de isocronas…';
+    fillTableAndDraw(poiFC, iso, cachedParaderos);
+
+    $status.textContent = 'Listo ✅';
+  } catch (err){
+    console.error(err);
+    $status.innerHTML = `<span class="warn">Error: ${err.message}</span>`;
+  }
+}
+
+async function getIsochrones(latlng, profile, minutes){
+  const ranges = minutes.map(m=>m*60);
+  const body = {locations: [[latlng.lng, latlng.lat]], range: ranges, range_type: "time"};
+  const res = await fetch(`https://api.openrouteservice.org/v2/isochrones/${profile}`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization': ORS_API_KEY},
+    body: JSON.stringify(body)
+  });
+  if(!res.ok) throw new Error('Error ORS: '+res.status);
+  const gj = await res.json();
+  gj.features.sort((a,b)=>a.properties.value - b.properties.value);
+  return gj;
+}
+
+function drawIsochrones(gj){
+  const colors=['#1f77b4','#2ca02c','#ff7f0e','#d62728'];
+  gj.features.forEach((f,i)=>{
+    const lay = L.geoJSON(f,{ style: { color:colors[i%colors.length], weight:2, fillOpacity:.35 } }).addTo(map);
+    isochroneLayers.push(lay);
+  });
+}
+
+function clearIsochrones(){
+  isochroneLayers.forEach(l=>map.removeLayer(l));
+  isochroneLayers.length=0;
+}
+
+/* ===================== POIs (Overpass) ===================== */
+/*
+  Consultamos por bbox (S,W,N,E) y luego filtramos con Turf dentro de cada isócrona.
+  Categorías cubiertas:
+    - Salud: amenity=hospital|clinic
+    - Educación: amenity=school|college|university
+    - Bancos: amenity=bank
+    - Mercados: shop=supermarket|convenience OR amenity=marketplace
+    - Policía: amenity=police
+*/
+async function fetchPOIsFromOverpass(bbox){
+  const [west, south, east, north] = [bbox[0], bbox[1], bbox[2], bbox[3]];
+  const swne = `${south},${west},${north},${east}`; // Overpass usa (S,W,N,E)
+  const query = `
+    [out:json][timeout:25];
+    (
+      node["amenity"~"hospital|clinic|school|college|university|bank|marketplace|police"](${swne});
+      node["shop"~"supermarket|convenience"](${swne});
+    );
+    out body;
+  `;
+  const url = 'https://overpass-api.de/api/interpreter';
+  const res = await fetch(url, { method:'POST', body: query, headers: {'Content-Type':'text/plain'} });
+  if(!res.ok) throw new Error('Overpass error: '+res.status);
+  const data = await res.json();
+  const feats = (data.elements || [])
+    .filter(el => el.type === 'node' && el.lat && el.lon)
+    .map(el => {
+      const props = el.tags || {};
+      return {
+        type: 'Feature',
+        geometry: { type:'Point', coordinates:[el.lon, el.lat] },
+        properties: {
+          ...props,
+          cat: classifyPOI(props),
+          name: props.name || ''
+        }
+      };
+    })
+    .filter(f => f.properties.cat !== null);
+  return { type:'FeatureCollection', features: feats };
+}
+
+function classifyPOI(tags){
+  const a = (tags.amenity||'').toLowerCase();
+  const s = (tags.shop||'').toLowerCase();
+  if (a==='hospital' || a==='clinic') return 'health';
+  if (a==='school' || a==='college' || a==='university') return 'school';
+  if (a==='bank') return 'bank';
+  if (a==='police') return 'police';
+  if (a==='marketplace' || s==='supermarket' || s==='convenience') return 'market';
+  return null;
+}
+
+function clearPOIs(){
+  poiLayerGroup.clearLayers();
+  paraderoLayerGroup.clearLayers();
+}
+
+/* ===================== Tabla + Dibujo ===================== */
+function fillTableAndDraw(poiFC, iso, paraderosFC){
+  const tbody = document.querySelector('#tabla tbody');
+  tbody.innerHTML = '';
+
+  // Preparar polígonos Turf por cada isócrona
+  const polys = iso.features.map(f => turf.feature(f.geometry, { minutes: f.properties.value/60 }));
+
+  // Índices visuales para isócronas (para etiqueta de minutos)
+  const minsSorted = polys.map(p => Math.round(p.properties.minutes));
+
+  // Precalcular puntos por isócrona
+  const ptsByIso = polys.map(poly => turf.pointsWithinPolygon(poiFC, poly));
+  const parByIso = polys.map(poly => {
+    if (!paraderosFC) return { type:'FeatureCollection', features: [] };
+    return turf.pointsWithinPolygon(paraderosFC, poly);
+  });
+
+  // Dibujar POIs (círculos)
+  const catStyle = {
+    health: { color:'var(--health)' },
+    school: { color:'var(--school)' },
+    bank:   { color:'var(--bank)' },
+    market: { color:'var(--market)' },
+    police: { color:'var(--police)' }
+  };
+
+  ptsByIso.forEach((fc, idx) => {
+    fc.features.forEach(f => {
+      const c = catStyle[f.properties.cat] || { color:'#555' };
+      const m = L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], {
+        radius: 4, color: getComputedStyle(document.documentElement).getPropertyValue(c.color) || c.color,
+        weight: 2, fillOpacity: 0.7
+      }).bindPopup(popupHTML(f));
+      poiLayerGroup.addLayer(m);
+    });
+  });
+
+  // Paraderos
+  parByIso.forEach(fc => {
+    fc.features.forEach(f => {
+      const m = L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], {
+        radius: 3, color:'#334155', weight: 1, fillOpacity: 0.6
+      }).bindPopup(f.properties && f.properties.name ? f.properties.name : 'Paradero');
+      paraderoLayerGroup.addLayer(m);
+    });
+  });
+
+  // Llenar tabla
+  ptsByIso.forEach((fc, i) => {
+    const counts = countByCategory(fc.features);
+    const parCount = parByIso[i].features.length;
+
+    const poiText =
+      `<span class="pill">Salud: ${counts.health}</span> ` +
+      `<span class="pill">Educación: ${counts.school}</span> ` +
+      `<span class="pill">Bancos: ${counts.bank}</span> ` +
+      `<span class="pill">Mercados: ${counts.market}</span> ` +
+      `<span class="pill">Policía: ${counts.police}</span>`;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${minsSorted[i]} min</td><td>${poiText}</td><td>${parCount}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function countByCategory(features){
+  const c = { health:0, school:0, bank:0, market:0, police:0 };
+  features.forEach(f => { if (c[f.properties.cat] !== undefined) c[f.properties.cat]++; });
+  return c;
+}
+
+function popupHTML(f){
+  const name = f.properties.name || '(sin nombre)';
+  const catMap = { health:'Salud', school:'Educación', bank:'Banco', market:'Mercado', police:'Policía' };
+  const cat = catMap[f.properties.cat] || 'POI';
+  return `<b>${name}</b><br>${cat}`;
+}
+
+/* ===================== Export ===================== */
+function exportGeoJSON(){
+  if(!lastIsochronesGeoJSON){ alert('No hay datos'); return; }
+  const blob = new Blob([JSON.stringify(lastIsochronesGeoJSON,null,2)],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'isocronas.geojson'; a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>

@@ -3,20 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>IsoMapa 15/30 – Accesibilidad a pie/bici</title>
+<title>IsoMapa Horas – Accesibilidad a pie/bici</title>
 
-<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<!-- Turf.js -->
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
-<!-- (Opcional) Export PNG -->
 <script src="https://unpkg.com/leaflet-easyprint@2.1.9/dist/bundle.min.js"></script>
 
 <style>
-  :root { --c1:#1f77b4; --c2:#2ca02c; --c3:#ff7f0e; --c4:#d62728;
+  :root { --c1:#1f77b4; --c2:#2ca02c; --c3:#ff7f0e; --c4:#d62728; --c5:#9467bd;
           --school:#8b5cf6; --health:#ef4444; --bank:#0ea5e9; --market:#f59e0b; --police:#10b981; }
   html,body,#map { height:100%; margin:0; }
   .panel {
@@ -43,7 +40,7 @@
 <body>
 
 <div class="panel">
-  <h2>IsoMapa 15/30</h2>
+  <h2>IsoMapa Horas</h2>
 
   <div class="row">
     <label>Modo:</label>
@@ -54,11 +51,12 @@
   </div>
 
   <div class="row">
-    <label>Tiempos (min):</label>
-    <label><input id="t5" type="checkbox" checked>5</label>
-    <label><input id="t10" type="checkbox" checked>10</label>
-    <label><input id="t15" type="checkbox" checked>15</label>
-    <label><input id="t30" type="checkbox" checked>30</label>
+    <label>Tiempos (hr):</label>
+    <label><input id="h1" type="checkbox" checked>1</label>
+    <label><input id="h2" type="checkbox" checked>2</label>
+    <label><input id="h3" type="checkbox" checked>3</label>
+    <label><input id="h4" type="checkbox">4</label>
+    <label><input id="h10" type="checkbox">10</label>
   </div>
 
   <div class="row">
@@ -67,10 +65,11 @@
   </div>
 
   <div class="legend">
-    <div><span class="color" style="background:rgba(31,119,180,.35);border:1px solid var(--c1)"></span></div><div>5 min</div>
-    <div><span class="color" style="background:rgba(44,160,44,.35);border:1px solid var(--c2)"></span></div><div>10 min</div>
-    <div><span class="color" style="background:rgba(255,127,14,.35);border:1px solid var(--c3)"></span></div><div>15 min</div>
-    <div><span class="color" style="background:rgba(214,39,40,.35);border:1px solid var(--c4)"></span></div><div>30 min</div>
+    <div><span class="color" style="background:rgba(31,119,180,.35);border:1px solid var(--c1)"></span></div><div>1 hr</div>
+    <div><span class="color" style="background:rgba(44,160,44,.35);border:1px solid var(--c2)"></span></div><div>2 hr</div>
+    <div><span class="color" style="background:rgba(255,127,14,.35);border:1px solid var(--c3)"></span></div><div>3 hr</div>
+    <div><span class="color" style="background:rgba(214,39,40,.35);border:1px solid var(--c4)"></span></div><div>4 hr</div>
+    <div><span class="color" style="background:rgba(148,103,189,.35);border:1px solid var(--c5)"></span></div><div>10 hr</div>
   </div>
 
   <div class="legend" style="margin-top:6px">
@@ -86,7 +85,7 @@
 
   <table id="tabla">
     <thead>
-      <tr><th>Radio (min)</th><th>POI</th><th>Paraderos ATU</th></tr>
+      <tr><th>Radio (hr)</th><th>POI</th><th>Paraderos ATU</th></tr>
     </thead>
     <tbody></tbody>
   </table>
@@ -144,7 +143,7 @@ async function runFromPoint(latlng){
     if (origenMarker) map.removeLayer(origenMarker);
     origenMarker = L.marker(latlng).addTo(map);
 
-    const selMins = [['t5',5],['t10',10],['t15',15],['t30',30]]
+    const selMins = [['h1',60],['h2',120],['h3',180],['h4',240],['h10',600]]
       .filter(([id]) => document.getElementById(id).checked)
       .map(([,m]) => m);
     if(selMins.length === 0){ alert('Seleccione al menos un tiempo'); return; }
@@ -194,7 +193,7 @@ async function getIsochrones(latlng, profile, minutes){
 }
 
 function drawIsochrones(gj){
-  const colors=['#1f77b4','#2ca02c','#ff7f0e','#d62728'];
+  const colors=['#1f77b4','#2ca02c','#ff7f0e','#d62728', '#9467bd'];
   gj.features.forEach((f,i)=>{
     const lay = L.geoJSON(f,{ style: { color:colors[i%colors.length], weight:2, fillOpacity:.35 } }).addTo(map);
     isochroneLayers.push(lay);
@@ -247,8 +246,8 @@ function fillTableAndDraw(poiFC, iso, paraderosFC){
   const tbody = document.querySelector('#tabla tbody');
   tbody.innerHTML = '';
 
-  const polys = iso.features.map(f => turf.feature(f.geometry, { minutes: f.properties.value/60 }));
-  const minsSorted = polys.map(p => Math.round(p.properties.minutes));
+  const polys = iso.features.map(f => turf.feature(f.geometry, { hours: f.properties.value / 3600 }));
+  const hrsSorted = polys.map(p => p.properties.hours.toLocaleString(undefined, { maximumFractionDigits: 1 }));
 
   const ptsByIso = polys.map(poly => turf.pointsWithinPolygon(poiFC, poly));
   const parByIso = polys.map(poly => paraderosFC ? turf.pointsWithinPolygon(paraderosFC, poly) : {type:'FeatureCollection',features:[]});
@@ -290,7 +289,7 @@ function fillTableAndDraw(poiFC, iso, paraderosFC){
       `<span class="pill">Mercados: ${counts.market}</span> ` +
       `<span class="pill">Policía: ${counts.police}</span>`;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${minsSorted[i]} min</td><td>${poiText}</td><td>${parCount}</td>`;
+    tr.innerHTML = `<td>${hrsSorted[i]} hr</td><td>${poiText}</td><td>${parCount}</td>`;
     tbody.appendChild(tr);
   });
 }
